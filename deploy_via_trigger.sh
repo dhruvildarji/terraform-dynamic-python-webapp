@@ -39,7 +39,7 @@ fi
 
 SOLUTION_ID="ecommerce-platform-serverless"
 
-IM_SUPPORTED_REGIONS=("us-central1" "europe-west1" "asia-east1")
+IM_SUPPORTED_REGIONS=("us-central1")
 
 for REGION in "${IM_SUPPORTED_REGIONS[@]}"; do
     echo "Checking for deployment in region: ${REGION}"
