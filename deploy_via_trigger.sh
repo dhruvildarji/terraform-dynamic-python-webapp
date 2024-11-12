@@ -47,6 +47,7 @@ for REGION in "${IM_SUPPORTED_REGIONS[@]}"; do
                         --filter="labels.goog-solutions-console-deployment-name:* AND \
                         labels.goog-solutions-console-solution-id:${SOLUTION_ID}" \
                         --format='value(name)' || true)
+    echo "DEPLOYMENT NAME ${DEPLOYMENT_NAME}"
     if [ -n "$DEPLOYMENT_NAME" ]; then
         echo "Found deployment: ${DEPLOYMENT_NAME} in region ${REGION}"
         break
