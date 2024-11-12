@@ -41,23 +41,25 @@ SOLUTION_ID="ecommerce-platform-serverless"
 
 IM_SUPPORTED_REGIONS=("us-central1")
 
-for REGION in "${IM_SUPPORTED_REGIONS[@]}"; do
-    echo "Checking for deployment in region: ${REGION}"
-    DEPLOYMENT_NAME=$(gcloud infra-manager deployments list --location "${REGION}" \
-                        --filter="labels.goog-solutions-console-deployment-name:* AND \
-                        labels.goog-solutions-console-solution-id:${SOLUTION_ID}" \
-                        --format='value(name)' || true)
-    echo "DEPLOYMENT NAME ${DEPLOYMENT_NAME}"
-    if [ -n "$DEPLOYMENT_NAME" ]; then
-        echo "Found deployment: ${DEPLOYMENT_NAME} in region ${REGION}"
-        break
-    fi
-done
+# for REGION in "${IM_SUPPORTED_REGIONS[@]}"; do
+#     echo "Checking for deployment in region: ${REGION}"
+#     DEPLOYMENT_NAME=$(gcloud infra-manager deployments list --location "${REGION}" \
+#                         --filter="labels.goog-solutions-console-deployment-name:* AND \
+#                         labels.goog-solutions-console-solution-id:${SOLUTION_ID}" \
+#                         --format='value(name)' || true)
+#     echo "DEPLOYMENT NAME ${DEPLOYMENT_NAME}"
+#     if [ -n "$DEPLOYMENT_NAME" ]; then
+#         echo "Found deployment: ${DEPLOYMENT_NAME} in region ${REGION}"
+#         break
+#     fi
+# done
 
-if [ -z "$DEPLOYMENT_NAME" ]; then
-    echo "Failed to find the existing deployment, exiting now!"
-    exit 1
-fi
+# if [ -z "$DEPLOYMENT_NAME" ]; then
+#     echo "Failed to find the existing deployment, exiting now!"
+#     exit 1
+# fi
+
+DEPLOYMENT_NAME="dynamic-web-app"
 
 echo "Project ID is ${PROJECT_ID}"
 echo "Region is ${REGION}"
