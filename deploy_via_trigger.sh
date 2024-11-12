@@ -2,7 +2,7 @@
 # Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
+# You may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #      http://www.apache.org/licenses/LICENSE-2.0
@@ -14,9 +14,11 @@
 # limitations under the License.
 
 set -o pipefail
+set -e  # Exit on any command failure for debugging
 
 handle_error() {
     local exit_code=$?
+    echo "Script encountered an error at line $LINENO with exit code $exit_code"
     exit $exit_code
 }
 trap 'handle_error' ERR
@@ -31,59 +33,66 @@ do
 done
 
 if [ -z "$PROJECT_ID" ]; then
-	echo "Failed to read the project id, exiting now!"
-	exit 1
+    echo "Failed to read the project id, exiting now!"
+    exit 1
 fi
 
 SOLUTION_ID="ecommerce-platform-serverless"
 
-# Iterate over the infra manager location to identify the deployment
-# currently one deployment per project is only supported
-# in future if multiple deployments are supported per project this will need to change
 IM_SUPPORTED_REGIONS=("us-central1" "europe-west1" "asia-east1")
 
 for REGION in "${IM_SUPPORTED_REGIONS[@]}"; do
+    echo "Checking for deployment in region: ${REGION}"
     DEPLOYMENT_NAME=$(gcloud infra-manager deployments list --location "${REGION}" \
                         --filter="labels.goog-solutions-console-deployment-name:* AND \
                         labels.goog-solutions-console-solution-id:${SOLUTION_ID}" \
-                        --format='value(name)')
+                        --format='value(name)' || true)
     if [ -n "$DEPLOYMENT_NAME" ]; then
+        echo "Found deployment: ${DEPLOYMENT_NAME} in region ${REGION}"
         break
     fi
 done
+
 if [ -z "$DEPLOYMENT_NAME" ]; then
-	echo "Failed to find the existing deployment, exiting now!"
-	exit 1
+    echo "Failed to find the existing deployment, exiting now!"
+    exit 1
 fi
+
 echo "Project ID is ${PROJECT_ID}"
 echo "Region is ${REGION}"
 echo "Deployment name is ${DEPLOYMENT_NAME}"
 
 SERVICE_ACCOUNT=$(gcloud infra-manager deployments describe "${DEPLOYMENT_NAME}" --location "${REGION}" --format='value(serviceAccount)')
+if [ -z "$SERVICE_ACCOUNT" ]; then
+    echo "Failed to retrieve service account for deployment ${DEPLOYMENT_NAME}"
+    exit 1
+fi
+echo "Service Account: ${SERVICE_ACCOUNT}"
 
 echo "Assigning required roles to the service account ${SERVICE_ACCOUNT}"
-# Iterate over the roles and check if the service account already has that role
-# assigned. If it has then skip adding that policy binding as using
-# --condition=None can overwrite any existing conditions in the binding.
+if ! command -v jq &> /dev/null; then
+    echo "Installing jq..."
+    apt-get update && apt-get install -y jq
+fi
+
 CURRENT_POLICY=$(gcloud projects get-iam-policy "${PROJECT_ID}" --format=json)
 MEMBER_EMAIL=$(echo "${SERVICE_ACCOUNT}" | awk -F '/' '{print $NF}')
 MEMBER="serviceAccount:${MEMBER_EMAIL}"
-apt-get install jq -y
-while IFS= read -r role || [[ -n "$role" ]]
-do \
-if echo "$CURRENT_POLICY" | jq -e --arg role "$role" --arg member "$MEMBER" '.bindings[] | select(.role == $role) | .members[] | select(. == $member)' > /dev/null; then \
-    echo "IAM policy binding already exists for member ${MEMBER} and role ${role}"
-else \
-    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="$MEMBER" \
-    --role="$role" \
-    --condition=None
-fi
+
+while IFS= read -r role || [[ -n "$role" ]]; do
+    if echo "$CURRENT_POLICY" | jq -e --arg role "$role" --arg member "$MEMBER" '.bindings[] | select(.role == $role) | .members[] | select(. == $member)' > /dev/null; then
+        echo "IAM policy binding already exists for member ${MEMBER} and role ${role}"
+    else
+        echo "Adding IAM policy binding for ${MEMBER} with role ${role}"
+        gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="$MEMBER" \
+        --role="$role" \
+        --condition=None || { echo "Failed to add IAM policy binding for ${role}"; exit 1; }
+    fi
 done < "roles.txt"
 
 DEPLOYMENT_DESCRIPTION=$(gcloud infra-manager deployments describe "${DEPLOYMENT_NAME}" --location "${REGION}" --format json)
 cat <<EOF > input.tfvars
-# Do not edit the region as changing the region can lead to failed deployment.
 region="$(echo "$DEPLOYMENT_DESCRIPTION" | jq -r '.terraformBlueprint.inputValues.region.inputValue')"
 project_id = "${PROJECT_ID}"
 labels = {
@@ -95,11 +104,15 @@ EOF
 echo "Creating the cloud storage bucket if it does not exist already"
 BUCKET_NAME="${PROJECT_ID}_infra_manager_staging"
 if ! gsutil ls "gs://$BUCKET_NAME" &> /dev/null; then
-    gsutil mb "gs://$BUCKET_NAME/"
+    gsutil mb "gs://$BUCKET_NAME/" || { echo "Failed to create bucket $BUCKET_NAME"; exit 1; }
     echo "Bucket $BUCKET_NAME created successfully."
 else
-    echo "Bucket $BUCKET_NAME already exists. Moving on to the next step."
+    echo "Bucket $BUCKET_NAME already exists."
 fi
 
 echo "Deploying the solution"
-gcloud infra-manager deployments apply projects/"${PROJECT_ID}"/locations/"${REGION}"/deployments/"${DEPLOYMENT_NAME}" --service-account "${SERVICE_ACCOUNT}" --local-source="infra" --inputs-file="input.tfvars" --labels="modification-reason=make-it-mine,goog-solutions-console-deployment-name=${DEPLOYMENT_NAME},goog-solutions-console-solution-id=${SOLUTION_ID},goog-config-partner=sc"
+gcloud infra-manager deployments apply projects/"${PROJECT_ID}"/locations/"${REGION}"/deployments/"${DEPLOYMENT_NAME}" \
+--service-account "${SERVICE_ACCOUNT}" --local-source="infra" --inputs-file="input.tfvars" \
+--labels="modification-reason=make-it-mine,goog-solutions-console-deployment-name=${DEPLOYMENT_NAME},goog-solutions-console-solution-id=${SOLUTION_ID},goog-config-partner=sc" || { echo "Deployment failed"; exit 1; }
+
+echo "Deployment completed successfully!"
